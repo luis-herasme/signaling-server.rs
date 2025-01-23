@@ -1,12 +1,12 @@
-from rust:bookworm as builder
+FROM rust:bookworm as builder
 
-workdir /app
-copy . .
-run cargo build --release
+WORKDIR /app
+COPY . .
+RUN cargo build --release
 
-from debian:bookworm-slim as runner
+FROM debian:bookworm-slim as runner
 
-workdir /app
-copy --from=builder /app/target/release/signaling-server /app/signaling-server
-cmd ["/app/signaling-server"]
-expose 1234
+WORKDIR /app
+COPY --from=builder /app/target/release/signaling-server /app/signaling-server
+CMD ["/app/signaling-server"]
+EXPOSE 1234
