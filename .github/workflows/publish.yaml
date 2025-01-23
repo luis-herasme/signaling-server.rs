@@ -1,0 +1,17 @@
+name: Publish image
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build_and_publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build and push to GitHub Container Registry
+        run: |
+          docker login -u luisherasme -p ${{ secrets.TOKEN }} ghcr.io
+          docker build . -t ghcr.io/luisherasme/signaling-server:latest
+          docker push ghcr.io/luisherasme/signaling-server:latest
