@@ -9,33 +9,30 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
 pub struct Sockets {
-    sockets:
-        Arc<Mutex<HashMap<String, Arc<Mutex<SplitSink<WebSocketStream<TcpStream>, Message>>>>>>,
+    sockets: HashMap<String, Arc<Mutex<SplitSink<WebSocketStream<TcpStream>, Message>>>>,
 }
 
 impl Sockets {
     pub fn new() -> Arc<Mutex<Sockets>> {
         Arc::new(Mutex::new(Self {
-            sockets: Arc::new(Mutex::new(HashMap::new())),
+            sockets: HashMap::new(),
         }))
     }
 
     async fn add(
-        &self,
+        &mut self,
         stream: WebSocketStream<TcpStream>,
     ) -> (SplitStream<WebSocketStream<TcpStream>>, String) {
         let id = uuid::Uuid::new_v4().to_string();
         let (write, read) = stream.split();
         let write = Arc::new(Mutex::new(write));
-        self.sockets.lock().await.insert(id.clone(), write);
+        self.sockets.insert(id.clone(), write);
 
         return (read, id);
     }
 
-    async fn send(&self, destination: &str, msg: Message) {
-        let sockets = self.sockets.lock().await;
-
-        if let Some(destination) = sockets.get(destination) {
+    async fn send(&mut self, destination: &str, msg: Message) {
+        if let Some(destination) = self.sockets.get(destination) {
             let mut destination_socket = destination.lock().await;
             destination_socket.send(msg).await.unwrap();
         }
@@ -59,7 +56,7 @@ async fn handle_connection(sockets: Arc<Mutex<Sockets>>, stream: TcpStream) {
     let stream = tokio_tungstenite::accept_async(stream).await.unwrap();
 
     let (mut read, id) = {
-        let sockets = sockets.lock().await;
+        let mut sockets = sockets.lock().await;
         sockets.add(stream).await
     };
 
