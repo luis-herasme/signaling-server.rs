@@ -1,10 +1,10 @@
-FROM rust:bookworm as builder
+FROM rust:slim AS builder
 
 WORKDIR /app
 COPY . .
 RUN cargo build --release
 
-FROM debian:bookworm-slim as runner
+FROM alpine AS runner
 
 WORKDIR /app
 COPY --from=builder /app/target/release/signaling-server /app/signaling-server
