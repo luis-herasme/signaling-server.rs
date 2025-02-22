@@ -1,108 +1,127 @@
-use crate::messages::{ClientMessage, ServerAnswer, ServerMessage, ServerOffer, ID};
-use futures_util::lock::Mutex;
-use futures_util::stream::{SplitSink, SplitStream};
+use crate::messages::{
+    ClientAnswer, ClientMessage, ClientOffer, ServerAnswer, ServerMessage, ServerOffer, ID,
+};
 use futures_util::{SinkExt, StreamExt};
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
+use tokio::net::{TcpListener, ToSocketAddrs};
+use tokio::sync::mpsc::{self, Sender};
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::WebSocketStream;
 
-pub struct Sockets {
-    sockets: HashMap<String, Arc<Mutex<SplitSink<WebSocketStream<TcpStream>, Message>>>>,
+struct ConnectionManager {
+    channels: HashMap<String, Sender<ServerMessage>>,
 }
 
-impl Sockets {
-    pub fn new() -> Arc<Mutex<Sockets>> {
-        Arc::new(Mutex::new(Self {
-            sockets: HashMap::new(),
-        }))
+impl ConnectionManager {
+    fn init() -> Sender<ConnectionManagerCommand> {
+        let mut connection_manager = ConnectionManager::new();
+        let (sender, mut receiver) = mpsc::channel(32);
+
+        tokio::spawn(async move {
+            while let Some(command) = receiver.recv().await {
+                match command {
+                    ConnectionManagerCommand::InsertChannel((id, channel)) => {
+                        connection_manager.insert(id, channel);
+                    }
+                    ConnectionManagerCommand::Send((id, message)) => {
+                        connection_manager.send(id, message).await;
+                    }
+                }
+            }
+        });
+
+        return sender;
     }
 
-    async fn add(
-        &mut self,
-        stream: WebSocketStream<TcpStream>,
-    ) -> (SplitStream<WebSocketStream<TcpStream>>, String) {
-        let id = uuid::Uuid::new_v4().to_string();
-        let (write, read) = stream.split();
-        let write = Arc::new(Mutex::new(write));
-        self.sockets.insert(id.clone(), write);
-
-        return (read, id);
+    fn new() -> ConnectionManager {
+        ConnectionManager {
+            channels: HashMap::new(),
+        }
     }
 
-    async fn send(&mut self, destination: &str, msg: Message) {
-        if let Some(destination) = self.sockets.get(destination) {
-            let mut destination_socket = destination.lock().await;
-            destination_socket.send(msg).await.unwrap();
+    fn insert(&mut self, id: String, channel: Sender<ServerMessage>) {
+        self.channels.insert(id, channel);
+    }
+
+    async fn send(&self, id: String, message: ServerMessage) {
+        if let Some(destination) = self.channels.get(&id) {
+            destination.send(message).await.unwrap();
         }
     }
 }
 
-pub async fn init<A>(addr: A)
+enum ConnectionManagerCommand {
+    InsertChannel((String, Sender<ServerMessage>)),
+    Send((String, ServerMessage)),
+}
+
+pub async fn init<A>(addr: A) -> Result<(), Box<dyn std::error::Error>>
 where
     A: ToSocketAddrs,
 {
-    let listener = TcpListener::bind(&addr).await.unwrap();
-    let sockets = Sockets::new();
+    let connection_manager = ConnectionManager::init();
+    let listener = TcpListener::bind(&addr).await?;
 
     while let Ok((stream, _)) = listener.accept().await {
-        let sockets = Arc::clone(&sockets);
-        tokio::spawn(handle_connection(sockets, stream));
+        let stream = tokio_tungstenite::accept_async(stream).await?;
+        let id = uuid::Uuid::new_v4().to_string();
+        let (mut write, mut read) = stream.split();
+
+        let (tx, mut rx) = mpsc::channel(32);
+        let insert_command = ConnectionManagerCommand::InsertChannel((id.clone(), tx));
+        connection_manager.send(insert_command).await?;
+
+        tokio::spawn(async move {
+            while let Some(message) = rx.recv().await {
+                let message = serde_json::to_string::<ServerMessage>(&message).unwrap();
+                let message = Message::from(message);
+                write.send(message).await.unwrap();
+            }
+        });
+
+        let connection_manager = connection_manager.clone();
+        tokio::spawn(async move {
+            while let Some(Ok(message)) = read.next().await {
+                let message = serde_json::from_str::<ClientMessage>(&message.to_string()).unwrap();
+                let (destination, message) = handle_client_message(message, id.clone()).await;
+                let send_command = ConnectionManagerCommand::Send((destination, message));
+                connection_manager.send(send_command).await.unwrap();
+            }
+        });
+    }
+
+    Ok(())
+}
+
+async fn handle_client_message(value: ClientMessage, socket_id: String) -> (String, ServerMessage) {
+    match value {
+        ClientMessage::Answer(answer) => handle_answer(answer, socket_id).await,
+        ClientMessage::Offer(offer) => handle_offer(offer, socket_id).await,
+        ClientMessage::GetMyID => handle_get_my_id(socket_id).await,
     }
 }
 
-async fn handle_connection(sockets: Arc<Mutex<Sockets>>, stream: TcpStream) {
-    let stream = tokio_tungstenite::accept_async(stream).await.unwrap();
-
-    let (mut read, id) = {
-        let mut sockets = sockets.lock().await;
-        sockets.add(stream).await
-    };
-
-    while let Some(Ok(message)) = read.next().await {
-        let sockets = Arc::clone(&sockets);
-        handle_msg(message.to_string(), id.clone(), sockets).await;
-    }
+async fn handle_answer(answer: ClientAnswer, socket_id: String) -> (String, ServerMessage) {
+    (
+        answer.to.clone(),
+        ServerMessage::Answer(ServerAnswer {
+            from: socket_id,
+            to: answer.to,
+            sdp: answer.sdp,
+        }),
+    )
 }
 
-async fn handle_msg(msg: String, socket_id: String, sockets: Arc<Mutex<Sockets>>) {
-    if let Ok(value) = serde_json::from_str::<ClientMessage>(&msg) {
-        match value {
-            ClientMessage::Answer(answer) => {
-                let destination_id = answer.to.clone();
+async fn handle_offer(offer: ClientOffer, socket_id: String) -> (String, ServerMessage) {
+    (
+        offer.to.clone(),
+        ServerMessage::Offer(ServerOffer {
+            from: socket_id,
+            to: offer.to,
+            sdp: offer.sdp,
+        }),
+    )
+}
 
-                let message = ServerMessage::Answer(ServerAnswer {
-                    from: socket_id,
-                    to: answer.to,
-                    sdp: answer.sdp,
-                });
-
-                let message = Message::from(serde_json::to_string(&message).unwrap());
-                sockets.lock().await.send(&destination_id, message).await;
-            }
-            ClientMessage::Offer(offer) => {
-                let detination_id = offer.to.clone();
-
-                let message = ServerMessage::Offer(ServerOffer {
-                    from: socket_id,
-                    to: offer.to,
-                    sdp: offer.sdp,
-                });
-
-                let message = Message::from(serde_json::to_string(&message).unwrap());
-                sockets.lock().await.send(&detination_id, message).await;
-            }
-            ClientMessage::GetMyID => {
-                let message = ServerMessage::ID(ID {
-                    id: socket_id.clone(),
-                });
-
-                let message =
-                    Message::from(serde_json::to_string::<ServerMessage>(&message).unwrap());
-
-                sockets.lock().await.send(&socket_id, message).await;
-            }
-        };
-    }
+async fn handle_get_my_id(socket_id: String) -> (String, ServerMessage) {
+    (socket_id.clone(), ServerMessage::ID(ID { id: socket_id }))
 }
