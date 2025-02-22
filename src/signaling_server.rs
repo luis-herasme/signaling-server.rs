@@ -12,40 +12,32 @@ struct ConnectionManager {
 }
 
 impl ConnectionManager {
-    fn init() -> Sender<ConnectionManagerCommand> {
-        let mut connection_manager = ConnectionManager::new();
-        let (sender, mut receiver) = mpsc::channel(32);
-
-        tokio::spawn(async move {
-            while let Some(command) = receiver.recv().await {
-                match command {
-                    ConnectionManagerCommand::InsertChannel((id, channel)) => {
-                        connection_manager.insert(id, channel);
-                    }
-                    ConnectionManagerCommand::Send((id, message)) => {
-                        connection_manager.send(id, message).await;
-                    }
-                }
-            }
-        });
-
-        return sender;
-    }
-
     fn new() -> ConnectionManager {
         ConnectionManager {
             channels: HashMap::new(),
         }
     }
 
-    fn insert(&mut self, id: String, channel: Sender<ServerMessage>) {
-        self.channels.insert(id, channel);
-    }
+    fn init() -> Sender<ConnectionManagerCommand> {
+        let mut manager = ConnectionManager::new();
+        let (sender, mut receiver) = mpsc::channel(32);
 
-    async fn send(&self, id: String, message: ServerMessage) {
-        if let Some(destination) = self.channels.get(&id) {
-            destination.send(message).await.unwrap();
-        }
+        tokio::spawn(async move {
+            while let Some(command) = receiver.recv().await {
+                match command {
+                    ConnectionManagerCommand::InsertChannel((id, channel)) => {
+                        manager.channels.insert(id, channel);
+                    }
+                    ConnectionManagerCommand::Send((id, message)) => {
+                        if let Some(destination) = manager.channels.get(&id) {
+                            destination.send(message).await.unwrap();
+                        }
+                    }
+                }
+            }
+        });
+
+        return sender;
     }
 }
 
