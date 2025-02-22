@@ -1,82 +1,39 @@
-use crate::messages::{
-    ClientAnswer, ClientMessage, ClientOffer, ServerAnswer, ServerMessage, ServerOffer, ID,
-};
+use crate::connection_manager::ConnectionsHandler;
+use crate::messages::{ClientAnswer, ClientMessage, ClientOffer, ServerAnswer, ServerMessage, ServerOffer, ID};
 use futures_util::{SinkExt, StreamExt};
-use std::collections::HashMap;
 use tokio::net::{TcpListener, ToSocketAddrs};
-use tokio::sync::mpsc::{self, Sender};
 use tokio_tungstenite::tungstenite::Message;
-
-struct ConnectionManager {
-    channels: HashMap<String, Sender<ServerMessage>>,
-}
-
-impl ConnectionManager {
-    fn new() -> ConnectionManager {
-        ConnectionManager {
-            channels: HashMap::new(),
-        }
-    }
-
-    fn init() -> Sender<ConnectionManagerCommand> {
-        let mut manager = ConnectionManager::new();
-        let (sender, mut receiver) = mpsc::channel(32);
-
-        tokio::spawn(async move {
-            while let Some(command) = receiver.recv().await {
-                match command {
-                    ConnectionManagerCommand::InsertChannel((id, channel)) => {
-                        manager.channels.insert(id, channel);
-                    }
-                    ConnectionManagerCommand::Send((id, message)) => {
-                        if let Some(destination) = manager.channels.get(&id) {
-                            destination.send(message).await.unwrap();
-                        }
-                    }
-                }
-            }
-        });
-
-        return sender;
-    }
-}
-
-enum ConnectionManagerCommand {
-    InsertChannel((String, Sender<ServerMessage>)),
-    Send((String, ServerMessage)),
-}
 
 pub async fn init<A>(addr: A) -> Result<(), Box<dyn std::error::Error>>
 where
     A: ToSocketAddrs,
 {
-    let connection_manager = ConnectionManager::init();
+    let connection_handler = ConnectionsHandler::new();
     let listener = TcpListener::bind(&addr).await?;
 
     while let Ok((stream, _)) = listener.accept().await {
         let stream = tokio_tungstenite::accept_async(stream).await?;
-        let id = uuid::Uuid::new_v4().to_string();
         let (mut write, mut read) = stream.split();
 
-        let (tx, mut rx) = mpsc::channel(32);
-        let insert_command = ConnectionManagerCommand::InsertChannel((id.clone(), tx));
-        connection_manager.send(insert_command).await?;
+        let (socket_id, mut receiver) = connection_handler.create_connection().await;
 
+        // Send messages to socket
+        let connection_handler = connection_handler.clone();
         tokio::spawn(async move {
-            while let Some(message) = rx.recv().await {
+            while let Some(message) = receiver.recv().await {
                 let message = serde_json::to_string::<ServerMessage>(&message).unwrap();
                 let message = Message::from(message);
                 write.send(message).await.unwrap();
             }
         });
 
-        let connection_manager = connection_manager.clone();
+        // Handle received messages from socket
+        let connection_handler = connection_handler.clone();
         tokio::spawn(async move {
             while let Some(Ok(message)) = read.next().await {
                 let message = serde_json::from_str::<ClientMessage>(&message.to_string()).unwrap();
-                let (destination, message) = handle_client_message(message, id.clone()).await;
-                let send_command = ConnectionManagerCommand::Send((destination, message));
-                connection_manager.send(send_command).await.unwrap();
+                let (destination_id, message) = handle_client_message(message, socket_id.clone()).await;
+                connection_handler.send_message(destination_id, message).await;
             }
         });
     }
