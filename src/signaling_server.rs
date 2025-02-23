@@ -35,6 +35,8 @@ where
                 let (destination_id, message) = handle_client_message(message, socket_id.clone()).await;
                 connection_handler.send_message(destination_id, message).await;
             }
+
+            connection_handler.remove_connection(socket_id).await;
         });
     }
 

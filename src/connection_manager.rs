@@ -21,6 +21,9 @@ impl<T: Send + Sync + 'static> Channels<T> {
                             destination.send(message).await.unwrap();
                         }
                     }
+                    Command::Remove(id) => {
+                        channels.channels.remove(&id);
+                    }
                 }
             }
         });
@@ -32,6 +35,7 @@ impl<T: Send + Sync + 'static> Channels<T> {
 enum Command<T> {
     Insert((String, Sender<T>)),
     Send((String, T)),
+    Remove(String),
 }
 
 pub struct ConnectionsHandler<T> {
@@ -57,6 +61,11 @@ impl<T: Send + Sync + 'static> ConnectionsHandler<T> {
     pub async fn send_message(&self, id: String, message: T) {
         let send_command = Command::Send((id, message));
         self.command_emitter.send(send_command).await.unwrap();
+    }
+
+    pub async fn remove_connection(&self, id: String) {
+        let remove_command = Command::Remove(id);
+        self.command_emitter.send(remove_command).await.unwrap();
     }
 
     pub fn clone(&self) -> ConnectionsHandler<T> {
