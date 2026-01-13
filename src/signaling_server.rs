@@ -21,9 +21,9 @@ where
         let connection_handler = connection_handler.clone();
         tokio::spawn(async move {
             while let Some(message) = receiver.recv().await {
-                let message = serde_json::to_string::<ServerMessage>(&message).unwrap();
+                let message = serde_json::to_string::<ServerMessage>(&message).expect("Received message could not be parsed");
                 let message = Message::from(message);
-                write.send(message).await.unwrap();
+                write.send(message).await.expect("Could not send received message");
             }
         });
 
@@ -31,9 +31,10 @@ where
         let connection_handler = connection_handler.clone();
         tokio::spawn(async move {
             while let Some(Ok(message)) = read.next().await {
-                let message = serde_json::from_str::<ClientMessage>(&message.to_string()).unwrap();
-                let (destination_id, message) = handle_client_message(message, socket_id.clone()).await;
-                connection_handler.send_message(destination_id, message).await;
+                if let Ok(message) = serde_json::from_str::<ClientMessage>(&message.to_string()) {
+                    let (destination_id, message) = handle_client_message(message, socket_id.clone()).await;
+                    connection_handler.send_message(destination_id, message).await;
+                }
             }
 
             connection_handler.remove_connection(socket_id).await;

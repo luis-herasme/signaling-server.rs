@@ -18,7 +18,10 @@ impl<T: Send + Sync + 'static> Channels<T> {
                     }
                     Command::Send((id, message)) => {
                         if let Some(destination) = channels.channels.get(&id) {
-                            destination.send(message).await.unwrap();
+                            destination
+                                .send(message)
+                                .await
+                                .expect("Peer could not send message to another peer");
                         }
                     }
                     Command::Remove(id) => {
@@ -53,19 +56,28 @@ impl<T: Send + Sync + 'static> ConnectionsHandler<T> {
         let id = uuid::Uuid::new_v4().to_string();
 
         let insert_command = Command::Insert((id.clone(), sender));
-        self.command_emitter.send(insert_command).await.unwrap();
+        self.command_emitter
+            .send(insert_command)
+            .await
+            .expect("Could not send (channel) connection-insert command");
 
         (id, receiver)
     }
 
     pub async fn send_message(&self, id: String, message: T) {
         let send_command = Command::Send((id, message));
-        self.command_emitter.send(send_command).await.unwrap();
+        self.command_emitter
+            .send(send_command)
+            .await
+            .expect("Could not send (channel) peer-message command");
     }
 
     pub async fn remove_connection(&self, id: String) {
         let remove_command = Command::Remove(id);
-        self.command_emitter.send(remove_command).await.unwrap();
+        self.command_emitter
+            .send(remove_command)
+            .await
+            .expect("Could not send remove command");
     }
 
     pub fn clone(&self) -> ConnectionsHandler<T> {
@@ -124,7 +136,7 @@ mod tests {
 
         // Verify messages are received in order
         for i in 0..5 {
-            assert_eq!(receiver.recv().await.unwrap(), i);
+            assert_eq!(receiver.recv().await.expect("Could no receive channel message"), i);
         }
     }
 
