@@ -10,24 +10,29 @@ where
 {
     let connection_handler = ConnectionsHandler::new();
     let listener = TcpListener::bind(&addr).await?;
+    log::info!("Signaling server started");
 
-    while let Ok((stream, _)) = listener.accept().await {
+    while let Ok((stream, addr)) = listener.accept().await {
         let stream = tokio_tungstenite::accept_async(stream).await?;
         let (mut write, mut read) = stream.split();
 
         let (socket_id, mut receiver) = connection_handler.create_connection().await;
+        log::info!("[{}] Connection established from {}", socket_id, addr);
 
         // Send messages to socket
         let connection_handler = connection_handler.clone();
+        let socket_id_send = socket_id.clone();
         tokio::spawn(async move {
             while let Some(message) = receiver.recv().await {
                 let Ok(message) = serde_json::to_string::<ServerMessage>(&message) else {
+                    log::warn!("[{}] Failed to serialize message", socket_id_send);
                     continue;
                 };
 
                 let message = Message::from(message);
 
                 if write.send(message).await.is_err() {
+                    log::debug!("[{}] WebSocket send failed, closing sender", socket_id_send);
                     break;
                 }
             }
@@ -43,6 +48,7 @@ where
                 }
             }
 
+            log::info!("[{}] Connection closed", socket_id);
             connection_handler.remove_connection(socket_id).await;
         });
     }
@@ -59,6 +65,7 @@ async fn handle_client_message(value: ClientMessage, socket_id: String) -> (Stri
 }
 
 async fn handle_answer(answer: ClientAnswer, socket_id: String) -> (String, ServerMessage) {
+    log::debug!("[{}] Routing answer to {}", socket_id, answer.to);
     (
         answer.to.clone(),
         ServerMessage::Answer(ServerAnswer {
@@ -70,6 +77,7 @@ async fn handle_answer(answer: ClientAnswer, socket_id: String) -> (String, Serv
 }
 
 async fn handle_offer(offer: ClientOffer, socket_id: String) -> (String, ServerMessage) {
+    log::debug!("[{}] Routing offer to {}", socket_id, offer.to);
     (
         offer.to.clone(),
         ServerMessage::Offer(ServerOffer {

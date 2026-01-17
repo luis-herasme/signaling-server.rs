@@ -16,17 +16,20 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
     let args = Args::parse();
 
-    if let Some(address) = args.address {
-        println!("[ARG] ADDRESS: {}", address);
-        signaling_server::init(address).await?;
+    let address = if let Some(address) = args.address {
+        log::info!("Using address from argument: {}", address);
+        address
     } else {
         dotenv().ok();
         let address = std::env::var("ADDRESS").expect("The ADDRESS environment variable is not set");
-        println!("[ENV] ADDRESS: {}", address);
-        signaling_server::init(address).await?;
-    }
+        log::info!("Using address from environment: {}", address);
+        address
+    };
+
+    signaling_server::init(address).await?;
 
     Ok(())
 }

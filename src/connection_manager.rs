@@ -18,10 +18,11 @@ impl<T: Send + Sync + 'static> Channels<T> {
                     }
                     Command::Send((id, message)) => {
                         if let Some(destination) = channels.channels.get(&id) {
-                            destination
-                                .send(message)
-                                .await
-                                .expect("Peer could not send message to another peer");
+                            if destination.send(message).await.is_err() {
+                                log::warn!("[{}] Failed to send message, receiver dropped", id);
+                            }
+                        } else {
+                            log::debug!("[{}] Message dropped, connection not found", id);
                         }
                     }
                     Command::Remove(id) => {
