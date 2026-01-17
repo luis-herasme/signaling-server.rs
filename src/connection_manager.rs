@@ -22,7 +22,7 @@ impl<T: Send + Sync + 'static> Channels<T> {
                                 log::warn!("[{}] Failed to send message, receiver dropped", id);
                             }
                         } else {
-                            log::debug!("[{}] Message dropped, connection not found", id);
+                            log::warn!("[{}] Message dropped, connection not found", id);
                         }
                     }
                     Command::Remove(id) => {
