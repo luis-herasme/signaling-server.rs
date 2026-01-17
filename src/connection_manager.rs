@@ -41,6 +41,7 @@ enum Command<T> {
     Remove(String),
 }
 
+#[derive(Clone)]
 pub struct ConnectionsHandler<T> {
     command_emitter: Sender<Command<T>>,
 }
@@ -78,12 +79,6 @@ impl<T: Send + Sync + 'static> ConnectionsHandler<T> {
             .send(remove_command)
             .await
             .expect("Could not send remove command");
-    }
-
-    pub fn clone(&self) -> ConnectionsHandler<T> {
-        ConnectionsHandler {
-            command_emitter: self.command_emitter.clone(),
-        }
     }
 }
 
