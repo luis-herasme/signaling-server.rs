@@ -2,7 +2,7 @@ use crate::connection_manager::ConnectionsHandler;
 use crate::messages::{ClientMessage, ServerAnswer, ServerMessage, ServerOffer, ID};
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, ToSocketAddrs};
-use tokio_tungstenite::tungstenite::{handshake::server, Message};
+use tokio_tungstenite::tungstenite::Message;
 
 pub async fn init<A>(addr: A) -> Result<(), Box<dyn std::error::Error>>
 where
