@@ -21,9 +21,15 @@ where
         let connection_handler = connection_handler.clone();
         tokio::spawn(async move {
             while let Some(message) = receiver.recv().await {
-                let message = serde_json::to_string::<ServerMessage>(&message).expect("Received message could not be parsed");
+                let Ok(message) = serde_json::to_string::<ServerMessage>(&message) else {
+                    continue;
+                };
+
                 let message = Message::from(message);
-                write.send(message).await.expect("Could not send received message");
+
+                if write.send(message).await.is_err() {
+                    break;
+                }
             }
         });
 
