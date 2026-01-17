@@ -23,14 +23,12 @@ pub enum ClientMessage {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ServerOffer {
     pub from: String,
-    pub to: String,
     pub sdp: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ServerAnswer {
     pub from: String,
-    pub to: String,
     pub sdp: String,
 }
 

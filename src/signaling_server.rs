@@ -73,10 +73,9 @@ async fn handle_client_message(value: ClientMessage, socket_id: String) -> (Stri
 async fn handle_answer(answer: ClientAnswer, socket_id: String) -> (String, ServerMessage) {
     log::debug!("[{}] Routing answer to {}", socket_id, answer.to);
     (
-        answer.to.clone(),
+        answer.to,
         ServerMessage::Answer(ServerAnswer {
             from: socket_id,
-            to: answer.to,
             sdp: answer.sdp,
         }),
     )
@@ -85,10 +84,9 @@ async fn handle_answer(answer: ClientAnswer, socket_id: String) -> (String, Serv
 async fn handle_offer(offer: ClientOffer, socket_id: String) -> (String, ServerMessage) {
     log::debug!("[{}] Routing offer to {}", socket_id, offer.to);
     (
-        offer.to.clone(),
+        offer.to,
         ServerMessage::Offer(ServerOffer {
             from: socket_id,
-            to: offer.to,
             sdp: offer.sdp,
         }),
     )
