@@ -42,9 +42,15 @@ where
         let connection_handler = connection_handler.clone();
         tokio::spawn(async move {
             while let Some(Ok(message)) = read.next().await {
-                if let Ok(message) = serde_json::from_str::<ClientMessage>(&message.to_string()) {
-                    let (destination_id, message) = handle_client_message(message, socket_id.clone()).await;
-                    connection_handler.send_message(destination_id, message).await;
+                let message_str = message.to_string();
+                match serde_json::from_str::<ClientMessage>(&message_str) {
+                    Ok(client_message) => {
+                        let (destination_id, response) = handle_client_message(client_message, socket_id.clone()).await;
+                        connection_handler.send_message(destination_id, response).await;
+                    }
+                    Err(e) => {
+                        log::warn!("[{}] Failed to deserialize message: {}", socket_id, e);
+                    }
                 }
             }
 
