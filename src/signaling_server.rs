@@ -1,8 +1,8 @@
 use crate::connection_manager::ConnectionsHandler;
-use crate::messages::{ClientAnswer, ClientMessage, ClientOffer, ServerAnswer, ServerMessage, ServerOffer, ID};
+use crate::messages::{ClientMessage, ServerAnswer, ServerMessage, ServerOffer, ID};
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, ToSocketAddrs};
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{handshake::server, Message};
 
 pub async fn init<A>(addr: A) -> Result<(), Box<dyn std::error::Error>>
 where
@@ -45,7 +45,7 @@ where
                 let message_str = message.to_string();
                 match serde_json::from_str::<ClientMessage>(&message_str) {
                     Ok(client_message) => {
-                        let (destination_id, response) = handle_client_message(client_message, socket_id.clone()).await;
+                        let (destination_id, response) = handle_client_message(client_message, socket_id.clone());
                         connection_handler.send_message(destination_id, response).await;
                     }
                     Err(e) => {
@@ -62,36 +62,31 @@ where
     Ok(())
 }
 
-async fn handle_client_message(value: ClientMessage, socket_id: String) -> (String, ServerMessage) {
-    match value {
-        ClientMessage::Answer(answer) => handle_answer(answer, socket_id).await,
-        ClientMessage::Offer(offer) => handle_offer(offer, socket_id).await,
-        ClientMessage::GetMyID => handle_get_my_id(socket_id).await,
+fn handle_client_message(message: ClientMessage, socket_id: String) -> (String, ServerMessage) {
+    match message {
+        ClientMessage::Offer(offer) => {
+            log::debug!("[{}] Routing offer to {}", socket_id, offer.to);
+            let message = ServerMessage::Offer(ServerOffer {
+                from: socket_id,
+                sdp: offer.sdp,
+            });
+
+            return (offer.to, message);
+        }
+        ClientMessage::Answer(answer) => {
+            log::debug!("[{}] Routing answer to {}", socket_id, answer.to);
+            let message = ServerMessage::Answer(ServerAnswer {
+                from: socket_id,
+                sdp: answer.sdp,
+            });
+
+            return (answer.to, message);
+        }
+        ClientMessage::GetMyID => {
+            log::debug!("[{}] Providing ID to client", socket_id);
+            let message = ServerMessage::ID(ID { id: socket_id.clone() });
+
+            return (socket_id, message);
+        }
     }
-}
-
-async fn handle_answer(answer: ClientAnswer, socket_id: String) -> (String, ServerMessage) {
-    log::debug!("[{}] Routing answer to {}", socket_id, answer.to);
-    (
-        answer.to,
-        ServerMessage::Answer(ServerAnswer {
-            from: socket_id,
-            sdp: answer.sdp,
-        }),
-    )
-}
-
-async fn handle_offer(offer: ClientOffer, socket_id: String) -> (String, ServerMessage) {
-    log::debug!("[{}] Routing offer to {}", socket_id, offer.to);
-    (
-        offer.to,
-        ServerMessage::Offer(ServerOffer {
-            from: socket_id,
-            sdp: offer.sdp,
-        }),
-    )
-}
-
-async fn handle_get_my_id(socket_id: String) -> (String, ServerMessage) {
-    (socket_id.clone(), ServerMessage::ID(ID { id: socket_id }))
 }
